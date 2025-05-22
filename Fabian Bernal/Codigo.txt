@@ -1,0 +1,129 @@
+import os
+import wave
+import contextlib
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from abc import ABC, abstractmethod
+from PIL import Image as PilImage
+
+# === Clase base abstracta ===
+class ArchivoMultimedia(ABC):
+    def __init__(self, ruta):
+        self.ruta = ruta
+        self.nombre = os.path.basename(ruta)
+
+    @abstractmethod
+    def procesar(self):
+        pass
+
+    @abstractmethod
+    def extraer_info(self):
+        pass
+
+# === Clase Imagen usando PIL ===
+class Imagen(ArchivoMultimedia):
+    def __init__(self, ruta):
+        super().__init__(ruta)
+        self.ancho = None
+        self.alto = None
+        self.color_promedio = None
+        self.tamano_kb = None
+
+    def procesar(self):
+        try:
+            with PilImage.open(self.ruta) as img:
+                self.ancho, self.alto = img.size
+                img_array = np.array(img)
+                if img_array.ndim == 3:  # RGB
+                    self.color_promedio = tuple(np.mean(img_array[:, :, :3], axis=(0, 1)))
+                else:  # escala de grises
+                    promedio = np.mean(img_array)
+                    self.color_promedio = (promedio, promedio, promedio)
+                self.tamano_kb = os.path.getsize(self.ruta) / 1024
+        except Exception as e:
+            print(f"Error procesando imagen {self.nombre}: {e}")
+
+    def extraer_info(self):
+        return {
+            "nombre": self.nombre,
+            "tipo": "imagen",
+            "ancho": self.ancho,
+            "alto": self.alto,
+            "color_promedio": self.color_promedio,
+            "tamano_kb": self.tamano_kb
+        }
+
+# === Clase Audio usando wave ===
+class Audio(ArchivoMultimedia):
+    def __init__(self, ruta):
+        super().__init__(ruta)
+        self.duracion = None
+        self.sample_rate = None
+        self.tamano_kb = None
+
+    def procesar(self):
+        try:
+            if self.ruta.lower().endswith(".wav"):
+                with contextlib.closing(wave.open(self.ruta, 'rb')) as f:
+                    frames = f.getnframes()
+                    self.sample_rate = f.getframerate()
+                    self.duracion = frames / float(self.sample_rate)
+                    self.tamano_kb = os.path.getsize(self.ruta) / 1024
+            else:
+                print(f"⚠️ Solo se aceptan archivos .wav: {self.nombre}")
+        except Exception as e:
+            print(f"Error procesando audio {self.nombre}: {e}")
+
+    def extraer_info(self):
+        return {
+            "nombre": self.nombre,
+            "tipo": "audio",
+            "duracion_segundos": self.duracion,
+            "sample_rate": self.sample_rate,
+            "tamano_kb": self.tamano_kb
+        }
+
+# === Función principal ===
+def analizar_carpeta(ruta_carpeta):
+    datos = []
+    for archivo in os.listdir(ruta_carpeta):
+        ruta_completa = os.path.join(ruta_carpeta, archivo)
+        if archivo.lower().endswith(('.jpg', '.jpeg', '.png')):
+            imagen = Imagen(ruta_completa)
+            imagen.procesar()
+            datos.append(imagen.extraer_info())
+        elif archivo.lower().endswith('.wav'):
+            audio = Audio(ruta_completa)
+            audio.procesar()
+            datos.append(audio.extraer_info())
+
+    df = pd.DataFrame(datos)
+    df.to_csv("resultado_multimedia.csv", index=False)
+    print("✅ Archivo CSV exportado: resultado_multimedia.csv")
+    return df
+
+# === Visualización con matplotlib ===
+def visualizar(df):
+    plt.figure(figsize=(10, 6))
+    df_audio = df[df["tipo"] == "audio"]
+    df_imagen = df[df["tipo"] == "imagen"]
+
+    if not df_audio.empty:
+        plt.hist(df_audio["duracion_segundos"].dropna(), bins=10, alpha=0.7, label="Duración de Audios", color="blue")
+    if not df_imagen.empty:
+        plt.hist(df_imagen["tamano_kb"].dropna(), bins=10, alpha=0.7, label="Tamaño de Imágenes", color="green")
+
+    plt.title("Distribución de archivos multimedia")
+    plt.xlabel("Valor")
+    plt.ylabel("Cantidad de archivos")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("visualizacion.png")
+    plt.show()
+
+# === Ejecutar programa principal ===
+if __name__ == "__main__":
+    carpeta = "E:\git\parcial\multimedia"  # Asegúrate de tener esta carpeta con .jpg/.png y .wav
+    df = analizar_carpeta(carpeta)
+    visualizar(df)
